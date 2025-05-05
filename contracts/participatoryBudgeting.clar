@@ -105,3 +105,97 @@
 (define-read-only (get-total-budget)
     (ok (var-get total-budget))
 )
+
+
+(define-map category-budgets
+    { category: (string-ascii 20) }
+    { 
+        cap: uint,
+        used: uint
+    }
+)
+
+(define-map proposal-categories
+    { proposal-id: uint }
+    { category: (string-ascii 20) }
+)
+
+(define-public (set-category-budget (category (string-ascii 20)) (cap uint))
+    (begin
+        (map-set category-budgets
+            { category: category }
+            { cap: cap, used: u0 }
+        )
+        (ok true)
+    )
+)
+
+(define-public (create-proposal-with-category 
+    (title (string-ascii 50)) 
+    (description (string-ascii 500)) 
+    (amount uint)
+    (category (string-ascii 20)))
+    (let
+        (
+            (new-id (+ (var-get proposal-count) u1))
+            (category-budget (unwrap! (map-get? category-budgets { category: category }) ERR-NO-PROPOSAL))
+        )
+        (asserts! (>= amount (var-get min-proposal-amount)) ERR-INSUFFICIENT-FUNDS)
+        (asserts! (<= (+ amount (get used category-budget)) (get cap category-budget)) ERR-INSUFFICIENT-FUNDS)
+        (map-set category-budgets
+            { category: category }
+            { cap: (get cap category-budget), used: (+ amount (get used category-budget)) }
+        )
+        (map-set proposal-categories { proposal-id: new-id } { category: category })
+        (create-proposal title description amount)
+    )
+)
+
+
+(define-map proposal-milestones
+    { proposal-id: uint, milestone-id: uint }
+    {
+        description: (string-ascii 100),
+        amount: uint,
+        completed: bool
+    }
+)
+
+(define-map milestone-counts
+    { proposal-id: uint }
+    { count: uint }
+)
+
+(define-public (add-milestone 
+    (proposal-id uint) 
+    (description (string-ascii 100))
+    (amount uint))
+    (let
+        (
+            (milestone-count (default-to { count: u0 } (map-get? milestone-counts { proposal-id: proposal-id })))
+            (new-milestone-id (+ (get count milestone-count) u1))
+        )
+        (map-set proposal-milestones
+            { proposal-id: proposal-id, milestone-id: new-milestone-id }
+            { description: description, amount: amount, completed: false }
+        )
+        (map-set milestone-counts
+            { proposal-id: proposal-id }
+            { count: new-milestone-id }
+        )
+        (ok new-milestone-id)
+    )
+)
+
+(define-public (complete-milestone (proposal-id uint) (milestone-id uint))
+    (let
+        (
+            (milestone (unwrap! (map-get? proposal-milestones { proposal-id: proposal-id, milestone-id: milestone-id }) ERR-NO-PROPOSAL))
+        )
+        (map-set proposal-milestones
+            { proposal-id: proposal-id, milestone-id: milestone-id }
+            (merge milestone { completed: true })
+        )
+        (ok true)
+    )
+)
