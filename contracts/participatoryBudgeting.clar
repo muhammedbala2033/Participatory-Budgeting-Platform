@@ -199,3 +199,157 @@
         (ok true)
     )
 )
+
+
+(define-map delegations
+    { delegator: principal }
+    { delegate: principal, active: bool }
+)
+
+(define-map delegate-vote-power
+    { delegate: principal }
+    { power: uint }
+)
+
+(define-map proposal-direct-votes
+    { voter: principal, proposal-id: uint }
+    { direct-vote: bool }
+)
+
+(define-public (delegate-vote (delegate principal))
+    (let
+        (
+            (current-delegation (map-get? delegations { delegator: tx-sender }))
+            (current-power (default-to { power: u0 } (map-get? delegate-vote-power { delegate: delegate })))
+        )
+        (match current-delegation
+            existing-delegation
+            (if (get active existing-delegation)
+                (let
+                    (
+                        (old-delegate (get delegate existing-delegation))
+                        (old-power (default-to { power: u0 } (map-get? delegate-vote-power { delegate: old-delegate })))
+                    )
+                    (map-set delegate-vote-power
+                        { delegate: old-delegate }
+                        { power: (- (get power old-power) u1) }
+                    )
+                    (map-set delegations
+                        { delegator: tx-sender }
+                        { delegate: delegate, active: true }
+                    )
+                    (map-set delegate-vote-power
+                        { delegate: delegate }
+                        { power: (+ (get power current-power) u1) }
+                    )
+                    (ok true)
+                )
+                (begin
+                    (map-set delegations
+                        { delegator: tx-sender }
+                        { delegate: delegate, active: true }
+                    )
+                    (map-set delegate-vote-power
+                        { delegate: delegate }
+                        { power: (+ (get power current-power) u1) }
+                    )
+                    (ok true)
+                )
+            )
+            (begin
+                (map-set delegations
+                    { delegator: tx-sender }
+                    { delegate: delegate, active: true }
+                )
+                (map-set delegate-vote-power
+                    { delegate: delegate }
+                    { power: (+ (get power current-power) u1) }
+                )
+                (ok true)
+            )
+        )
+    )
+)
+
+(define-public (revoke-delegation)
+    (let
+        (
+            (delegation (unwrap! (map-get? delegations { delegator: tx-sender }) ERR-NOT-AUTHORIZED))
+        )
+        (asserts! (get active delegation) ERR-NOT-AUTHORIZED)
+        (let
+            (
+                (delegate (get delegate delegation))
+                (current-power (default-to { power: u0 } (map-get? delegate-vote-power { delegate: delegate })))
+            )
+            (map-set delegations
+                { delegator: tx-sender }
+                { delegate: delegate, active: false }
+            )
+            (map-set delegate-vote-power
+                { delegate: delegate }
+                { power: (- (get power current-power) u1) }
+            )
+            (ok true)
+        )
+    )
+)
+
+(define-public (vote-as-delegate (proposal-id uint))
+    (let
+        (
+            (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NO-PROPOSAL))
+            (vote-status (default-to { voted: false } (map-get? votes { voter: tx-sender, proposal-id: proposal-id })))
+            (delegate-power (default-to { power: u0 } (map-get? delegate-vote-power { delegate: tx-sender })))
+            (total-votes (+ u1 (get power delegate-power)))
+        )
+        (asserts! (< (- stacks-block-height (get created-at proposal)) (var-get voting-period)) ERR-VOTING-CLOSED)
+        (asserts! (not (get voted vote-status)) ERR-ALREADY-VOTED)
+        (map-set proposals
+            { proposal-id: proposal-id }
+            (merge proposal { votes: (+ (get votes proposal) total-votes) })
+        )
+        (map-set votes
+            { voter: tx-sender, proposal-id: proposal-id }
+            { voted: true }
+        )
+        (ok total-votes)
+    )
+)
+
+(define-public (vote-direct (proposal-id uint))
+    (let
+        (
+            (proposal (unwrap! (map-get? proposals { proposal-id: proposal-id }) ERR-NO-PROPOSAL))
+            (vote-status (default-to { voted: false } (map-get? votes { voter: tx-sender, proposal-id: proposal-id })))
+            (delegation (map-get? delegations { delegator: tx-sender }))
+        )
+        (asserts! (< (- stacks-block-height (get created-at proposal)) (var-get voting-period)) ERR-VOTING-CLOSED)
+        (asserts! (not (get voted vote-status)) ERR-ALREADY-VOTED)
+        (map-set proposals
+            { proposal-id: proposal-id }
+            (merge proposal { votes: (+ (get votes proposal) u1) })
+        )
+        (map-set votes
+            { voter: tx-sender, proposal-id: proposal-id }
+            { voted: true }
+        )
+        (map-set proposal-direct-votes
+            { voter: tx-sender, proposal-id: proposal-id }
+            { direct-vote: true }
+        )
+        (ok true)
+    )
+)
+
+(define-read-only (get-delegation (delegator principal))
+    (ok (map-get? delegations { delegator: delegator }))
+)
+
+(define-read-only (get-delegate-power (delegate principal))
+    (ok (default-to { power: u0 } (map-get? delegate-vote-power { delegate: delegate })))
+)
+
+(define-read-only (is-direct-vote (voter principal) (proposal-id uint))
+    (ok (default-to { direct-vote: false } (map-get? proposal-direct-votes { voter: voter, proposal-id: proposal-id })))
+)
