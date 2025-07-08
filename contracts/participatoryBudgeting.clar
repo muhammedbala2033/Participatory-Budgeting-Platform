@@ -83,7 +83,7 @@
 
 (define-data-var min-approvers uint u3)
 (define-data-var dispute-resolution-period uint u1008)
-(define-data-var auto-release-delay uint u2016)Zz
+(define-data-var auto-release-delay uint u2016)
 
 (define-data-var total-budget uint u1000000)
 (define-data-var proposal-count uint u0)
